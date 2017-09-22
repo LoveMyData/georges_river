@@ -1,93 +1,88 @@
 <?php
 ### Georges River Council scraper
+require_once 'vendor/autoload.php';
+require_once 'vendor/openaustralia/scraperwiki/scraperwiki.php';
 
-require 'scraperwiki.php';
-require 'simple_html_dom.php';
+use PGuardiario\PGBrowser;
+use Sunra\PhpSimple\HtmlDomParser;
 
 date_default_timezone_set('Australia/Sydney');
 
-// Default to 'thisweek', use MORPH_PERIOD to change to 'thismonth' or 'lastmonth' for data recovery
+# Default to 'thisweek', use MORPH_PERIOD to change to 'thismonth' or 'lastmonth' for data recovery
 switch(getenv('MORPH_PERIOD')) {
     case 'thismonth' :
-        $datefrom = date('01/m/Y');         // hard-coded '01' for first day
-        $dateto   = date('t/m/Y');
+        $period = 'thismonth';
         break;
     case 'lastmonth' :
-        $datefrom = date('d/m/Y', strtotime('first day of previous month'));
-        $dateto   = date('d/m/Y', strtotime('last day of previous month'));
+        $period = 'lastmonth';
         break;
-    case 'thisweek' :
-    default         :
-        $datefrom = date('d/m/Y', strtotime('-1 week'));
-        $dateto   = date('d/m/Y');
+    default          :
+        $period = 'thisweek';
         break;
 }
-print "Getting data between " .$datefrom. " and " .$dateto. ", changable via MORPH_PERIOD environment\n";
+print "Getting data for " .$period. ", changable via MORPH_PERIOD environment\n";
 
+$url_base = "https://daenquiry.georgesriver.nsw.gov.au/masterviewui/Modules/applicationmaster/";
+$da_page = $url_base . "default.aspx?page=found&1=" .$period. "&4a=DA%27,%27S96Mods%27,%27Mods%27,%27Reviews&6=F";
+$comment_base = "mailto:mail@georgesriver.nsw.gov.au?subject=Development Application Enquiry: ";
 
-// setup all the know kind of fixed stuff
-$junktoServer = 'draw=1&columns%5B0%5D%5Bdata%5D=0&columns%5B0%5D%5Bname%5D=&columns%5B0%5D%5Bsearchable%5D=true&columns%5B0%5D%5Borderable%5D=false&columns%5B0%5D%5Bsearch%5D%5Bvalue%5D=&columns%5B0%5D%5Bsearch%5D%5Bregex%5D=false&columns%5B1%5D%5Bdata%5D=1&columns%5B1%5D%5Bname%5D=&columns%5B1%5D%5Bsearchable%5D=true&columns%5B1%5D%5Borderable%5D=false&columns%5B1%5D%5Bsearch%5D%5Bvalue%5D=&columns%5B1%5D%5Bsearch%5D%5Bregex%5D=false&columns%5B2%5D%5Bdata%5D=2&columns%5B2%5D%5Bname%5D=&columns%5B2%5D%5Bsearchable%5D=true&columns%5B2%5D%5Borderable%5D=false&columns%5B2%5D%5Bsearch%5D%5Bvalue%5D=&columns%5B2%5D%5Bsearch%5D%5Bregex%5D=false&columns%5B3%5D%5Bdata%5D=3&columns%5B3%5D%5Bname%5D=&columns%5B3%5D%5Bsearchable%5D=true&columns%5B3%5D%5Borderable%5D=false&columns%5B3%5D%5Bsearch%5D%5Bvalue%5D=&columns%5B3%5D%5Bsearch%5D%5Bregex%5D=false&columns%5B4%5D%5Bdata%5D=4&columns%5B4%5D%5Bname%5D=&columns%5B4%5D%5Bsearchable%5D=true&columns%5B4%5D%5Borderable%5D=false&columns%5B4%5D%5Bsearch%5D%5Bvalue%5D=&columns%5B4%5D%5Bsearch%5D%5Bregex%5D=false&start=0&length=100&search%5Bvalue%5D=&search%5Bregex%5D=false&json=';
-$jsontoServer = '{"ApplicationNumber":null,"ApplicationYear":null,"DateFrom":"1/06/2016","DateTo":"30/06/2016","DateType":"1","RemoveUndeterminedApplications":false,"ApplicationDescription":null,"ApplicationType":null,"UnitNumberFrom":null,"UnitNumberTo":null,"StreetNumberFrom":null,"StreetNumberTo":null,"StreetName":null,"SuburbName":null,"PostCode":null,"PropertyName":null,"LotNumber":null,"PlanNumber":null,"ShowOutstandingApplications":false,"ShowExhibitedApplications":false,"PropertyKeys":null,"PrecinctValue":null,"IncludeDocuments":false}';
+# Agreed Terms
+$browser = new PGBrowser();
+$page = $browser->get($url_base . "default.aspx");
+$form = $page->form();
+$form->set('ctl00$cphContent$ctl00$Button1', 'Agreed');
+$page = $form->submit();
 
-$url_base = "http://www2.kogarah.nsw.gov.au/Application/GetApplications";
-$infourl_base = "http://www2.kogarah.nsw.gov.au/Application/ApplicationDetails/";
-$comment_base = "mailto:mail@kogarah.nsw.gov.au";
+# Assume Terms page passed
+$page = $browser->get($da_page);
+$dom = HtmlDomParser::str_get_html($page->html);
 
-// set the date from and date to field
-$json = json_decode($jsontoServer);
-$json->DateFrom = $datefrom;
-$json->DateTo   = $dateto;
-$json = json_encode($json, JSON_UNESCAPED_SLASHES);
+# By default, assume it is single page
+$dataset  = $dom->find("tr[class=rgRow], tr[class=rgAltRow]");
+$NumPages = count($dom->find('div[class=rgWrap rgNumPart] a'));
+if ($NumPages === 0) { $NumPages = 1; }
 
-// Create a stream
-$opts = array(
-  'http'=>array(
-    'method'  => "POST",
-    'header'  => "Accept: application/json\r\n" .
-                 "Content-Type: application/x-www-form-urlencoded; charset=UTF-8\r\n" .
-                 "Cookie: User=accessAllowed-MasterView=True\r\n",
-    'content' => $junktoServer . urlencode($json),
-    'timeout' => 300,
-  )
-);
-$context = stream_context_create($opts);
+for ($i = 1; $i <= $NumPages; $i++) {
+    echo "Scraping page $i of $NumPages\r\n";
 
-// Open the file using the HTTP headers set above and deal with the stuff received
-$file  = file_get_contents($url_base, false, $context);
-$decodedStuff = json_decode($file);
+    # If more than a single page, fetch the page
+    if ($NumPages > 1) {
+        $form = $page->form();
+        $page = $form->doPostBack($dom->find('div[class=rgWrap rgNumPart] a', $i-1)->href);
+        $dom  = HtmlDomParser::str_get_html($page->html);
+        $dataset = $dom->find("tr[class=rgRow], tr[class=rgAltRow]");
+    }
 
-
-    // The usual, look for the data set and if needed, save it
-    foreach ($decodedStuff->data as $record) {
-        // Slow way to transform the date but it works
-        $date_received = explode('/', $record[3]);
+    # The usual, look for the data set and if needed, save it
+    foreach ($dataset as $record) {
+        # Slow way to transform the date but it works
+        $date_received = explode(' ', (trim($record->children(2)->plaintext)), 2);
+        $date_received = explode('/', $date_received[0]);
         $date_received = "$date_received[2]-$date_received[1]-$date_received[0]";
 
-        // Get the address and description
-        $tokens = explode(" <br/>", $record[4]);
-        $address = $tokens[0];
-        $description = str_ireplace(['<b>', '</b>'], '', end($tokens));
+        # Prep a bit more, ready to add these to the array
+        $tempstr = explode('<br/>', $record->children(3)->innertext);
 
-        // Put all information in an array
-        $application = array (
-            'council_reference' => $record[1],
-            'address'           => $address,
-            'description'       => $description,
-            'info_url'          => $infourl_base . $record[0],
-            'comment_url'       => $comment_base,
+        # Put all information in an array
+        $application = [
+            'council_reference' => trim($record->children(1)->plaintext),
+            'address'           => trim($record->children(3)->children(0)->plaintext) . ", NSW",
+            'description'       => preg_replace('/\s+/', ' ', $tempstr[1]),
+            'info_url'          => $url_base . trim($record->find('a',0)->href),
+            'comment_url'       => $comment_base . trim($record->children(1)->plaintext),
             'date_scraped'      => date('Y-m-d'),
             'date_received'     => date('Y-m-d', strtotime($date_received))
-        );
+        ];
 
-        // Check if record exist, if not, INSERT, else do nothing
+        # Check if record exist, if not, INSERT, else do nothing
         $existingRecords = scraperwiki::select("* from data where `council_reference`='" . $application['council_reference'] . "'");
         if (count($existingRecords) == 0) {
-            print ("Saving record " . $application['council_reference'] . ' - ' . $address . "\n");
-            // print_r ($application);
-            scraperwiki::save(array('council_reference'), $application);
+            print ("Saving record " . $application['council_reference'] . "\n");
+//             print_r ($application);
+            scraperwiki::save(['council_reference'], $application);
         } else {
             print ("Skipping already saved record " . $application['council_reference'] . "\n");
         }
     }
+}
 
-?>
