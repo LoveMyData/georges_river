@@ -1,17 +1,16 @@
-Georges River council scraper
------------------------------
+# Georges River council scraper
 
-This site is a typical .NET site involves the followings.
+This site is a typical .NET site involves the followings
+
+* Server - Masterview
 * Cookie - Yes
-* Pagnation - No, hardcoded to fetch up to 100 records
-* Javascript - No
-* Ajax - Yes
-* JSON - Yes
+* Pagnation - Yes
+* Javascript - Yes - doPostBack
 
 Setup MORPH_PERIOD for data recovery, available options are
-* thisweek (default, today - 1 week)
+
+* thisweek (default)
 * thismonth
 * lastmonth
 
 Enjoy
-
